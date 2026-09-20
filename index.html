@@ -138,58 +138,44 @@
     let gameOver = false;
     let gameWon = false;
 
-    // --- Sistema de Toque Robusto com Pointer Events ---
-    let movePointerId = null;
-    let moveStartX = 0;
-    let moveStartY = 0;
-    let currentMoveX = 0;
-    let currentMoveY = 0;
+    // --- Sistema Direcional por Zonas de Ecrã com Multitoque ---
+    const activeTouches = new Map();
     let jumpRequested = false;
 
-    canvas.addEventListener('pointerdown', e => {
+    function handleTouchChange(e) {
       e.preventDefault();
       initAudio();
 
       if (gameOver || gameWon) {
-        resetGame();
+        if (e.type === 'touchstart') resetGame();
         return;
       }
 
+      activeTouches.clear();
       const rect = canvas.getBoundingClientRect();
-      const clickX = e.clientX - rect.left;
-      const isLeftSide = clickX < (rect.width / 2);
+      const width = rect.width;
 
-      if (isLeftSide && movePointerId === null) {
-        movePointerId = e.pointerId;
-        moveStartX = e.clientX;
-        moveStartY = e.clientY;
-        currentMoveX = e.clientX;
-        currentMoveY = e.clientY;
-      } else {
-        jumpRequested = true;
-      }
-    }, { passive: false });
+      for (let i = 0; i < e.touches.length; i++) {
+        const touch = e.touches[i];
+        const relativeX = touch.clientX - rect.left;
+        const normalizedX = relativeX / width;
 
-    window.addEventListener('pointermove', e => {
-      if (e.pointerId === movePointerId) {
-        currentMoveX = e.clientX;
-        currentMoveY = e.clientY;
-      }
-    }, { passive: false });
+        // Guarda o identificador do dedo e a respetiva zona
+        activeTouches.set(touch.identifier, normalizedX);
 
-    function clearPointer(e) {
-      if (e.pointerId === movePointerId) {
-        movePointerId = null;
-        moveStartX = 0;
-        moveStartY = 0;
-        currentMoveX = 0;
-        currentMoveY = 0;
+        // Se colocou um dedo na zona direita do ecrã, salta imediatamente
+        if (normalizedX >= 0.65 && e.type === 'touchstart') {
+          jumpRequested = true;
+        }
       }
     }
-    window.addEventListener('pointerup', clearPointer);
-    window.addEventListener('pointercancel', clearPointer);
 
-    // Teclado para testes no computador
+    canvas.addEventListener('touchstart', handleTouchChange, { passive: false });
+    canvas.addEventListener('touchmove', handleTouchChange, { passive: false });
+    canvas.addEventListener('touchend', handleTouchChange, { passive: false });
+    canvas.addEventListener('touchcancel', handleTouchChange, { passive: false });
+
+    // Suporte a teclado para PC
     const keys = {};
     window.addEventListener('keydown', e => {
       initAudio();
@@ -269,7 +255,8 @@
       deathRotation = 0; deathTimer = 0;
       gameOver = false; gameWon = false;
       projectiles = []; particles = [];
-      movePointerId = null; jumpRequested = false;
+      activeTouches.clear();
+      jumpRequested = false;
 
       platforms.forEach(p => {
         if (p.type === 'falling' || p.type === 'crusher') {
@@ -358,24 +345,20 @@
       }
       if (gameWon) return;
 
-      // Movimentação
+      // Leitura de Direção por Toque Lateral do Ecrã
       let moveDir = 0;
-      let wantDown = keys['ArrowDown'] || keys['KeyS'];
-
-      if (movePointerId !== null) {
-        const dx = currentMoveX - moveStartX;
-        const dy = currentMoveY - moveStartY;
-
-        if (dx > 15) moveDir = 1;
-        else if (dx < -15) moveDir = -1;
-
-        if (dy > 30) wantDown = true;
+      for (const normX of activeTouches.values()) {
+        if (normX < 0.35) {
+          moveDir = -1; // Esquerda
+        } else if (normX >= 0.35 && normX < 0.65) {
+          moveDir = 1;  // Direita
+        }
       }
 
       if (keys['ArrowLeft'] || keys['KeyA']) moveDir = -1;
       if (keys['ArrowRight'] || keys['KeyD']) moveDir = 1;
 
-      isCrouching = wantDown && isGrounded;
+      isCrouching = (keys['ArrowDown'] || keys['KeyS']) && isGrounded;
       isFacingFront = !!keys['Space'];
 
       if (moveDir !== 0 && !isCrouching) {
@@ -589,6 +572,7 @@
 
       drawSnoop(ctx, playerX - cam, playerY);
 
+      // HUD
       ctx.fillStyle = 'rgba(15, 10, 20, 0.8)';
       ctx.fillRect(15, 15, 260, 42);
       ctx.fillStyle = '#e74c3c'; ctx.font = 'bold 20px Arial';
@@ -625,7 +609,7 @@
         c.fillStyle = '#1e3820';
         c.fillRect(-6, -24, 5, 24); c.fillRect(1, -24, 5, 24);
         c.fillStyle = '#27ae60'; c.fillRect(-10, -42, 20, 18);
-        c.fillStyle = '#fff'; c.fillRect(-1, -42, 2, 18);
+        c.fillStyle = '#fff'; c.fillRect(-1, -38, 2, 18);
         c.fillStyle = '#8a5634'; c.beginPath(); c.arc(0, -50, 6, 0, Math.PI * 2); c.fill();
         c.fillStyle = '#111'; c.fillRect(-7, -52, 14, 4);
         c.strokeStyle = '#181212'; c.lineWidth = 3;
