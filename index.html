@@ -111,7 +111,7 @@
       }, stepDur * 1000);
     }
 
-    // --- Constantes e Variáveis de Jogo ---
+    // --- Constantes de Física ---
     const GRAVITY = 1350.0;
     const JUMP_STRENGTH = -540.0;
     const ACCEL = 1600.0;
@@ -138,11 +138,11 @@
     let gameOver = false;
     let gameWon = false;
 
-    // --- Sistema Direcional por Zonas de Ecrã com Multitoque ---
-    const activeTouches = new Map();
+    // --- Controle Amplo de Tela Inteira de Ponta a Ponta ---
+    const touchList = new Map();
     let jumpRequested = false;
 
-    function handleTouchChange(e) {
+    function updateTouchData(e) {
       e.preventDefault();
       initAudio();
 
@@ -151,31 +151,35 @@
         return;
       }
 
-      activeTouches.clear();
+      touchList.clear();
       const rect = canvas.getBoundingClientRect();
-      const width = rect.width;
+      const w = rect.width;
+      const h = rect.height;
+
+      // Se um novo dedo tocou e já havia outro na tela, ativa o pulo imediato (salto em corrida)
+      if (e.type === 'touchstart' && e.touches.length > 1) {
+        jumpRequested = true;
+      }
 
       for (let i = 0; i < e.touches.length; i++) {
-        const touch = e.touches[i];
-        const relativeX = touch.clientX - rect.left;
-        const normalizedX = relativeX / width;
+        const t = e.touches[i];
+        const nx = (t.clientX - rect.left) / w;
+        const ny = (t.clientY - rect.top) / h;
+        touchList.set(t.identifier, { nx, ny });
 
-        // Guarda o identificador do dedo e a respetiva zona
-        activeTouches.set(touch.identifier, normalizedX);
-
-        // Se colocou um dedo na zona direita do ecrã, salta imediatamente
-        if (normalizedX >= 0.65 && e.type === 'touchstart') {
+        // Toque na metade direita acima do rodapé registra pulo
+        if (e.type === 'touchstart' && nx >= 0.5 && ny < 0.75) {
           jumpRequested = true;
         }
       }
     }
 
-    canvas.addEventListener('touchstart', handleTouchChange, { passive: false });
-    canvas.addEventListener('touchmove', handleTouchChange, { passive: false });
-    canvas.addEventListener('touchend', handleTouchChange, { passive: false });
-    canvas.addEventListener('touchcancel', handleTouchChange, { passive: false });
+    window.addEventListener('touchstart', updateTouchData, { passive: false });
+    window.addEventListener('touchmove', updateTouchData, { passive: false });
+    window.addEventListener('touchend', updateTouchData, { passive: false });
+    window.addEventListener('touchcancel', updateTouchData, { passive: false });
 
-    // Suporte a teclado para PC
+    // Suporte a teclado no PC
     const keys = {};
     window.addEventListener('keydown', e => {
       initAudio();
@@ -255,7 +259,7 @@
       deathRotation = 0; deathTimer = 0;
       gameOver = false; gameWon = false;
       projectiles = []; particles = [];
-      activeTouches.clear();
+      touchList.clear();
       jumpRequested = false;
 
       platforms.forEach(p => {
@@ -345,20 +349,26 @@
       }
       if (gameWon) return;
 
-      // Leitura de Direção por Toque Lateral do Ecrã
+      // Amplitude Total: Esquerda (0.0 até 0.50) e Direita (0.50 até 1.0)
       let moveDir = 0;
-      for (const normX of activeTouches.values()) {
-        if (normX < 0.35) {
-          moveDir = -1; // Esquerda
-        } else if (normX >= 0.35 && normX < 0.65) {
-          moveDir = 1;  // Direita
+      let wantDown = false;
+
+      for (const t of touchList.values()) {
+        if (t.ny > 0.8) {
+          wantDown = true;
+        }
+        if (t.nx < 0.5) {
+          moveDir = -1; // Pressionando qualquer parte da metade esquerda
+        } else {
+          moveDir = 1;  // Pressionando qualquer parte da metade direita
         }
       }
 
       if (keys['ArrowLeft'] || keys['KeyA']) moveDir = -1;
       if (keys['ArrowRight'] || keys['KeyD']) moveDir = 1;
+      if (keys['ArrowDown'] || keys['KeyS']) wantDown = true;
 
-      isCrouching = (keys['ArrowDown'] || keys['KeyS']) && isGrounded;
+      isCrouching = wantDown && isGrounded;
       isFacingFront = !!keys['Space'];
 
       if (moveDir !== 0 && !isCrouching) {
@@ -370,7 +380,7 @@
         else if (playerVx < 0) playerVx = Math.min(0, playerVx + FRICTION * ACCEL * dt);
       }
 
-      // Salto
+      // Pulo
       const wantJump = jumpRequested || keys['ArrowUp'] || keys['KeyW'];
       jumpRequested = false;
 
@@ -572,7 +582,6 @@
 
       drawSnoop(ctx, playerX - cam, playerY);
 
-      // HUD
       ctx.fillStyle = 'rgba(15, 10, 20, 0.8)';
       ctx.fillRect(15, 15, 260, 42);
       ctx.fillStyle = '#e74c3c'; ctx.font = 'bold 20px Arial';
@@ -585,14 +594,14 @@
         ctx.fillStyle = '#f1c40f'; ctx.font = 'bold 48px Arial'; ctx.textAlign = 'center';
         ctx.fillText('SNOOP VENCEU!', 400, 260);
         ctx.fillStyle = '#fff'; ctx.font = '24px Arial';
-        ctx.fillText('Toque no ecrã para reiniciar', 400, 320);
+        ctx.fillText('Toque na tela para reiniciar', 400, 320);
         ctx.textAlign = 'start';
       } else if (gameOver && deathTimer > 1.0) {
         ctx.fillStyle = 'rgba(0,0,0,0.7)'; ctx.fillRect(0, 0, 800, 600);
         ctx.fillStyle = '#e74c3c'; ctx.font = 'bold 48px Arial'; ctx.textAlign = 'center';
         ctx.fillText('DERROTADO!', 400, 260);
         ctx.fillStyle = '#fff'; ctx.font = '24px Arial';
-        ctx.fillText('Toque no ecrã para tentar de novo', 400, 320);
+        ctx.fillText('Toque na tela para tentar de novo', 400, 320);
         ctx.textAlign = 'start';
       }
     }
@@ -609,7 +618,7 @@
         c.fillStyle = '#1e3820';
         c.fillRect(-6, -24, 5, 24); c.fillRect(1, -24, 5, 24);
         c.fillStyle = '#27ae60'; c.fillRect(-10, -42, 20, 18);
-        c.fillStyle = '#fff'; c.fillRect(-1, -38, 2, 18);
+        c.fillStyle = '#fff'; c.fillRect(-1, -42, 2, 18);
         c.fillStyle = '#8a5634'; c.beginPath(); c.arc(0, -50, 6, 0, Math.PI * 2); c.fill();
         c.fillStyle = '#111'; c.fillRect(-7, -52, 14, 4);
         c.strokeStyle = '#181212'; c.lineWidth = 3;
