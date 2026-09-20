@@ -15,60 +15,33 @@
       -webkit-user-select: none;
       touch-action: none;
       -webkit-tap-highlight-color: transparent;
-    }
-    body, html {
       margin: 0;
       padding: 0;
+    }
+    body, html {
       width: 100vw;
       height: 100vh;
-      height: 100dvh; /* Garante a altura real descontando as barras do navegador */
-      background-color: #0b080d;
+      height: 100dvh;
+      background-color: #000;
       overflow: hidden;
-      font-family: Arial, sans-serif;
       position: fixed;
-    }
-    #game-container {
-      position: relative;
-      width: 100%;
-      height: 100%;
       display: flex;
       justify-content: center;
       align-items: center;
-      background: #000;
-      padding-bottom: env(safe-area-inset-bottom);
     }
-    canvas {
+    #canvas {
       width: 100%;
       height: 100%;
       max-width: 100vw;
       max-height: 100vh;
       object-fit: contain;
-    }
-    /* Indicador visual discreto nas margens inferiores */
-    .touch-hints {
-      position: absolute;
-      bottom: max(16px, env(safe-area-inset-bottom));
-      left: 0;
-      right: 0;
-      display: flex;
-      justify-content: space-between;
-      padding: 0 24px;
-      pointer-events: none;
-      opacity: 0.35;
-      font-size: 13px;
-      font-weight: bold;
-      color: #fff;
+      touch-action: none;
+      display: block;
     }
   </style>
 </head>
 <body>
-  <div id="game-container">
-    <canvas id="canvas" width="800" height="600"></canvas>
-    <div class="touch-hints">
-      <span>◀ Deslizar: Mover ▶</span>
-      <span>Toque: Saltar ▲</span>
-    </div>
-  </div>
+  <canvas id="canvas" width="800" height="600"></canvas>
 
   <script>
     const canvas = document.getElementById('canvas');
@@ -138,7 +111,7 @@
       }, stepDur * 1000);
     }
 
-    // --- Física e Nível ---
+    // --- Constantes e Variáveis de Jogo ---
     const GRAVITY = 1350.0;
     const JUMP_STRENGTH = -540.0;
     const ACCEL = 1600.0;
@@ -165,63 +138,58 @@
     let gameOver = false;
     let gameWon = false;
 
-    // --- Controlo Direto por Gestos no Ecrã (Sem Botões Virtuais) ---
-    let touchMoveActive = false;
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let touchCurrentX = 0;
-    let touchCurrentY = 0;
+    // --- Sistema de Toque Robusto com Pointer Events ---
+    let movePointerId = null;
+    let moveStartX = 0;
+    let moveStartY = 0;
+    let currentMoveX = 0;
+    let currentMoveY = 0;
+    let jumpRequested = false;
 
-    let jumpTriggered = false;
-
-    window.addEventListener('touchstart', e => {
+    canvas.addEventListener('pointerdown', e => {
+      e.preventDefault();
       initAudio();
+
       if (gameOver || gameWon) {
         resetGame();
         return;
       }
 
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        const halfWidth = window.innerWidth / 2;
+      const rect = canvas.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const isLeftSide = clickX < (rect.width / 2);
 
-        // Metade Esquerda: Controlo Analógico de Direção e Agachar
-        if (t.clientX < halfWidth) {
-          touchMoveActive = true;
-          touchStartX = t.clientX;
-          touchStartY = t.clientY;
-          touchCurrentX = t.clientX;
-          touchCurrentY = t.clientY;
-        }
-        // Metade Direita: Pulo
-        else {
-          jumpTriggered = true;
-        }
+      if (isLeftSide && movePointerId === null) {
+        movePointerId = e.pointerId;
+        moveStartX = e.clientX;
+        moveStartY = e.clientY;
+        currentMoveX = e.clientX;
+        currentMoveY = e.clientY;
+      } else {
+        jumpRequested = true;
       }
     }, { passive: false });
 
-    window.addEventListener('touchmove', e => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        if (touchMoveActive) {
-          touchCurrentX = t.clientX;
-          touchCurrentY = t.clientY;
-        }
+    window.addEventListener('pointermove', e => {
+      if (e.pointerId === movePointerId) {
+        currentMoveX = e.clientX;
+        currentMoveY = e.clientY;
       }
     }, { passive: false });
 
-    window.addEventListener('touchend', e => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const t = e.changedTouches[i];
-        if (t.clientX < window.innerWidth / 2) {
-          touchMoveActive = false;
-          touchCurrentX = touchStartX;
-          touchCurrentY = touchStartY;
-        }
+    function clearPointer(e) {
+      if (e.pointerId === movePointerId) {
+        movePointerId = null;
+        moveStartX = 0;
+        moveStartY = 0;
+        currentMoveX = 0;
+        currentMoveY = 0;
       }
-    }, { passive: false });
+    }
+    window.addEventListener('pointerup', clearPointer);
+    window.addEventListener('pointercancel', clearPointer);
 
-    // Fallback de Teclado para Desktop
+    // Teclado para testes no computador
     const keys = {};
     window.addEventListener('keydown', e => {
       initAudio();
@@ -301,7 +269,7 @@
       deathRotation = 0; deathTimer = 0;
       gameOver = false; gameWon = false;
       projectiles = []; particles = [];
-      touchMoveActive = false; jumpTriggered = false;
+      movePointerId = null; jumpRequested = false;
 
       platforms.forEach(p => {
         if (p.type === 'falling' || p.type === 'crusher') {
@@ -390,18 +358,18 @@
       }
       if (gameWon) return;
 
-      // Leitura de Comandos (Gestos Touch ou Teclado)
+      // Movimentação
       let moveDir = 0;
       let wantDown = keys['ArrowDown'] || keys['KeyS'];
 
-      if (touchMoveActive) {
-        const deltaX = touchCurrentX - touchStartX;
-        const deltaY = touchCurrentY - touchStartY;
+      if (movePointerId !== null) {
+        const dx = currentMoveX - moveStartX;
+        const dy = currentMoveY - moveStartY;
 
-        if (deltaX > 20) moveDir = 1;
-        else if (deltaX < -20) moveDir = -1;
+        if (dx > 15) moveDir = 1;
+        else if (dx < -15) moveDir = -1;
 
-        if (deltaY > 35) wantDown = true;
+        if (dy > 30) wantDown = true;
       }
 
       if (keys['ArrowLeft'] || keys['KeyA']) moveDir = -1;
@@ -419,9 +387,9 @@
         else if (playerVx < 0) playerVx = Math.min(0, playerVx + FRICTION * ACCEL * dt);
       }
 
-      // Execução do Salto
-      const wantJump = jumpTriggered || keys['ArrowUp'] || keys['KeyW'];
-      jumpTriggered = false;
+      // Salto
+      const wantJump = jumpRequested || keys['ArrowUp'] || keys['KeyW'];
+      jumpRequested = false;
 
       if (wantJump && !isCrouching) {
         if (isGrounded || coyoteTimer > 0) {
